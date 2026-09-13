@@ -3,14 +3,25 @@ import type { CellValue, ColumnType } from './types';
 const DATE_PATTERNS = [
 	/^\d{4}-\d{2}-\d{2}/, // 2024-01-31
 	/^\d{1,2}\/\d{1,2}\/\d{2,4}$/, // 1/31/2024
-	/^\d{4}$/, // bare year, e.g. 2024
 	/^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{4}$/i // "Jan 2024"
 ];
 
+// A bare 4-digit number is only treated as a year if it falls in a plausible calendar
+// range — otherwise any numeric column whose values happen to be 4 digits (population
+// counts, prices, IDs, ...) gets misclassified as a date column.
+const BARE_YEAR_RANGE: [number, number] = [1500, 2100];
+
 export function looksLikeDate(value: string): boolean {
-	if (!value) return false;
-	if (DATE_PATTERNS.some((p) => p.test(value.trim()))) {
-		return !Number.isNaN(Date.parse(value));
+	const trimmed = value.trim();
+	if (!trimmed) return false;
+
+	if (/^\d{4}$/.test(trimmed)) {
+		const year = Number(trimmed);
+		return year >= BARE_YEAR_RANGE[0] && year <= BARE_YEAR_RANGE[1];
+	}
+
+	if (DATE_PATTERNS.some((p) => p.test(trimmed))) {
+		return !Number.isNaN(Date.parse(trimmed));
 	}
 	return false;
 }

@@ -8,6 +8,11 @@ Datawrapper-style tool built with SvelteKit + TypeScript + D3, following [`INKLI
 > Name note: "Inkline" collides with an existing Vue.js UI library at `github.com/inkline` —
 > going with it anyway, just don't expect the plain `inkline` npm package name to be free.
 
+|  |  |
+|---|---|
+| ![Column chart](./screenshots/column-chart.png) | ![Bar chart](./screenshots/bar-chart.png) |
+| ![Area chart](./screenshots/area-chart.png) | ![Multi-series line chart](./screenshots/multi-series-line.png) |
+
 ## Status
 
 **Phase 1 (MVP) is implemented and verified working end-to-end:**
