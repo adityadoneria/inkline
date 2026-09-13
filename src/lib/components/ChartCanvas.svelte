@@ -36,7 +36,7 @@
 
 <div
 	bind:this={container}
-	class="inkline-chart-container relative w-full overflow-hidden rounded border border-gray-200 bg-white text-gray-900 dark:border-gray-700"
+	class="inkline-chart-container relative w-full overflow-hidden rounded border border-gray-100 bg-white p-3 text-gray-900 dark:border-gray-800"
 	class:dark={config.style.darkMode}
 	style:font-family={config.style.fontFamily}
 	style:background={config.style.darkMode ? '#111827' : 'white'}

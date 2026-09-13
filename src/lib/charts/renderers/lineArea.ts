@@ -1,11 +1,12 @@
 import * as d3 from 'd3';
 import type { ChartConfig } from '../config';
 import { formatValueForColumn, pickDateGranularity, formatDate } from '../format';
-import { createTooltip, renderLegend, renderTitleBlock, type RenderContext } from './barColumn';
+import { createTooltip, type RenderContext } from './barColumn';
+import { computeLayout, renderHorizontalGridlines, styleBareAxis, renderLegend, renderTitleBlock } from './layout';
 
-const MARGIN = { top: 32, right: 132, bottom: 40, left: 56 };
 /** Below this width, end-of-line direct labels collapse into a traditional legend (Datawrapper's signature mobile behavior). */
 const MOBILE_BREAKPOINT = 480;
+const DIRECT_LABEL_WIDTH = 90;
 
 export function renderLineArea(ctx: RenderContext) {
 	const { svg, dataset, config, width, height } = ctx;
@@ -18,9 +19,15 @@ export function renderLineArea(ctx: RenderContext) {
 
 	const isDateAxis = xCol.type === 'date';
 	const isMobile = width < MOBILE_BREAKPOINT;
-	const rightMargin = isMobile || !config.style.showLegend ? 24 : MARGIN.right;
-	const innerWidth = width - MARGIN.left - rightMargin;
-	const innerHeight = height - MARGIN.top - MARGIN.bottom;
+	const useDirectLabels = !isMobile && config.style.showLegend;
+	const showTopLegend = isMobile && config.style.showLegend && seriesCols.length > 1;
+
+	const layout = computeLayout(config, showTopLegend, {
+		right: useDirectLabels ? DIRECT_LABEL_WIDTH : 16,
+		left: 48
+	});
+	const innerWidth = width - layout.left - layout.right;
+	const innerHeight = height - layout.top - layout.bottom;
 
 	const color = d3
 		.scaleOrdinal<string>()
@@ -29,57 +36,50 @@ export function renderLineArea(ctx: RenderContext) {
 
 	const xValues = dataset.rows.map((r) => r[xCol.id]);
 	const xScale = isDateAxis
-		? d3.scaleTime(
-				d3.extent(xValues as number[]) as [number, number],
-				[0, innerWidth]
-			)
-		: d3.scalePoint(
-				xValues.map(String),
-				[0, innerWidth]
-			);
+		? d3.scaleTime(d3.extent(xValues as number[]) as [number, number], [0, innerWidth])
+		: d3.scalePoint(xValues.map(String), [0, innerWidth]);
 
 	const allValues = dataset.rows.flatMap((r) => seriesCols.map((c) => Number(r[c.id] ?? 0)));
 	const maxValue = d3.max(allValues) ?? 0;
-	const minValue = config.lineOptions.logScale ? Math.max(1, d3.min(allValues) ?? 1) : Math.min(0, d3.min(allValues) ?? 0);
+	const minValue = config.lineOptions.logScale
+		? Math.max(1, d3.min(allValues) ?? 1)
+		: Math.min(0, d3.min(allValues) ?? 0);
 	const yScale = (config.lineOptions.logScale ? d3.scaleLog() : d3.scaleLinear())
 		.domain([minValue, maxValue])
 		.nice()
 		.range([innerHeight, 0]);
 
-	const g = root
-		.attr('width', width)
-		.attr('height', height)
-		.attr('viewBox', `0 0 ${width} ${height}`)
-		.append('g')
-		.attr('transform', `translate(${MARGIN.left},${MARGIN.top})`);
+	root.attr('width', width).attr('height', height).attr('viewBox', `0 0 ${width} ${height}`);
 
-	// Axes
+	renderTitleBlock(root, config, height);
+	if (showTopLegend) renderLegend(root, seriesCols, color, 0, layout.legendY);
+
+	const g = root.append('g').attr('transform', `translate(${layout.left},${layout.top})`);
+
+	renderHorizontalGridlines(g, yScale as d3.ScaleLinear<number, number>, innerWidth, 6);
+
+	// Axes — bare (no domain/tick lines), muted label color.
 	let xAxis;
 	if (isDateAxis) {
 		const span = (d3.extent(xValues as number[])[1] ?? 0) - (d3.extent(xValues as number[])[0] ?? 0);
 		const granularity = pickDateGranularity(span);
-		xAxis = d3.axisBottom(xScale as d3.ScaleTime<number, number>).tickFormat((d) => formatDate(+d, granularity));
+		xAxis = d3
+			.axisBottom(xScale as d3.ScaleTime<number, number>)
+			.tickFormat((d) => formatDate(+d, granularity));
 	} else {
 		xAxis = d3.axisBottom(xScale as d3.ScalePoint<string>);
 	}
 
-	g.append('g')
-		.attr('transform', `translate(0,${innerHeight})`)
-		.call(xAxis as never)
-		.selectAll('text')
-		.attr('font-size', 11)
-		.attr('fill', 'currentColor');
+	const xAxisG = g.append('g').attr('transform', `translate(0,${innerHeight})`).call(xAxis as never);
+	styleBareAxis(xAxisG);
 
-	g.append('g')
-		.call(d3.axisLeft(yScale).ticks(6) as never)
-		.selectAll('text')
-		.attr('font-size', 11)
-		.attr('fill', 'currentColor');
-
-	g.selectAll('.domain, .tick line').attr('stroke', 'currentColor').attr('stroke-opacity', 0.25);
+	const yAxisG = g.append('g').call(d3.axisLeft(yScale).ticks(6) as never);
+	styleBareAxis(yAxisG);
 
 	const xAccessor = (row: Record<string, unknown>) =>
-		isDateAxis ? (xScale as d3.ScaleTime<number, number>)(row[xCol.id] as number) : (xScale as d3.ScalePoint<string>)(String(row[xCol.id]))!;
+		isDateAxis
+			? (xScale as d3.ScaleTime<number, number>)(row[xCol.id] as number)
+			: (xScale as d3.ScalePoint<string>)(String(row[xCol.id]))!;
 
 	const curve = config.lineOptions.interpolation === 'smooth' ? d3.curveMonotoneX : d3.curveLinear;
 
@@ -114,7 +114,9 @@ export function renderLineArea(ctx: RenderContext) {
 			.attr('d', line)
 			.attr('fill', 'none')
 			.attr('stroke', color(col.id))
-			.attr('stroke-width', 2);
+			.attr('stroke-width', 2.5)
+			.attr('stroke-linejoin', 'round')
+			.attr('stroke-linecap', 'round');
 
 		if (config.lineOptions.showDots) {
 			g.selectAll(`.dot-${col.id}`)
@@ -143,24 +145,27 @@ export function renderLineArea(ctx: RenderContext) {
 			)
 			.on('mouseleave', () => tooltip.hide());
 
-		// Direct end-of-line label (signature Datawrapper behavior) unless collapsed to legend on mobile
-		if (!isMobile && config.style.showLegend) {
+		// Direct end-of-line label (signature Datawrapper behavior) unless collapsed to a top legend on mobile
+		if (useDirectLabels) {
 			const lastRow = [...dataset.rows].reverse().find((r) => r[col.id] !== null);
 			if (lastRow) {
-				g.append('text')
-					.attr('x', xAccessor(lastRow) + 6)
-					.attr('y', yScale(Number(lastRow[col.id])))
-					.attr('dy', '0.32em')
+				const labelGroup = g
+					.append('g')
+					.attr('transform', `translate(${xAccessor(lastRow) + 6},${yScale(Number(lastRow[col.id]))})`);
+				labelGroup
+					.append('text')
+					.attr('dy', '-0.15em')
+					.attr('font-size', 11)
+					.attr('font-weight', 600)
+					.attr('fill', color(col.id))
+					.text(col.name);
+				labelGroup
+					.append('text')
+					.attr('dy', '1.05em')
 					.attr('font-size', 11)
 					.attr('fill', color(col.id))
-					.text(`${col.name} ${formatValueForColumn(Number(lastRow[col.id]), col)}`);
+					.text(formatValueForColumn(Number(lastRow[col.id]), col));
 			}
 		}
 	});
-
-	if (isMobile && config.style.showLegend && seriesCols.length > 1) {
-		renderLegend(root, seriesCols, color, width);
-	}
-
-	renderTitleBlock(root, config, width);
 }

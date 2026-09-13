@@ -2,6 +2,7 @@ import * as d3 from 'd3';
 import type { Dataset } from '../../data/types';
 import type { ChartConfig } from '../config';
 import { formatValueForColumn } from '../format';
+import { computeLayout, renderHorizontalGridlines, styleBareAxis, renderLegend, renderTitleBlock } from './layout';
 
 export interface RenderContext {
 	svg: SVGSVGElement;
@@ -10,8 +11,6 @@ export interface RenderContext {
 	width: number;
 	height: number;
 }
-
-const MARGIN = { top: 32, right: 24, bottom: 48, left: 64 };
 
 export function renderBarColumn(ctx: RenderContext) {
 	const { svg, dataset, config, width, height } = ctx;
@@ -23,8 +22,10 @@ export function renderBarColumn(ctx: RenderContext) {
 	if (!xCol || seriesCols.length === 0) return;
 
 	const horizontal = config.type === 'bar';
-	const innerWidth = width - MARGIN.left - MARGIN.right;
-	const innerHeight = height - MARGIN.top - MARGIN.bottom;
+	const showLegend = config.style.showLegend && seriesCols.length > 1;
+	const layout = computeLayout(config, showLegend, { right: 16, left: horizontal ? 96 : 48 });
+	const innerWidth = width - layout.left - layout.right;
+	const innerHeight = height - layout.top - layout.bottom;
 
 	const categories = dataset.rows.map((r) => String(r[xCol.id] ?? ''));
 	const color = d3.scaleOrdinal<string>().domain(seriesCols.map((c) => c.id)).range(config.style.palette);
@@ -49,42 +50,33 @@ export function renderBarColumn(ctx: RenderContext) {
 		.range([0, categoryScale.bandwidth()])
 		.padding(0.08);
 
-	const g = root
-		.attr('width', width)
-		.attr('height', height)
-		.attr('viewBox', `0 0 ${width} ${height}`)
-		.append('g')
-		.attr('transform', `translate(${MARGIN.left},${MARGIN.top})`);
+	root.attr('width', width).attr('height', height).attr('viewBox', `0 0 ${width} ${height}`);
 
-	// Axes
+	renderTitleBlock(root, config, height);
+	if (showLegend) renderLegend(root, seriesCols, color, 0, layout.legendY);
+
+	const g = root.append('g').attr('transform', `translate(${layout.left},${layout.top})`);
+
+	// Gridlines sit behind the marks; only along the value axis (horizontal-only, Datawrapper-style).
+	renderHorizontalGridlines(g, valueScale as d3.ScaleLinear<number, number>, horizontal ? innerWidth : innerWidth, 6);
+
+	// Axes — bare (no domain/tick lines), muted label color.
 	const categoryAxis = horizontal ? d3.axisLeft(categoryScale) : d3.axisBottom(categoryScale);
 	const valueAxis = horizontal ? d3.axisBottom(valueScale) : d3.axisLeft(valueScale);
 
-	g.append('g')
+	const categoryAxisG = g
+		.append('g')
 		.attr('class', 'category-axis')
 		.attr('transform', horizontal ? '' : `translate(0,${innerHeight})`)
-		.call(categoryAxis as never)
-		.selectAll('text')
-		.attr('font-size', 12)
-		.attr('fill', 'currentColor');
+		.call(categoryAxis as never);
+	styleBareAxis(categoryAxisG);
 
-	g.append('g')
+	const valueAxisG = g
+		.append('g')
 		.attr('class', 'value-axis')
 		.attr('transform', horizontal ? `translate(0,${innerHeight})` : '')
-		.call(valueAxis as never)
-		.selectAll('text')
-		.attr('font-size', 12)
-		.attr('fill', 'currentColor');
-
-	g.selectAll('.domain, .tick line').attr('stroke', 'currentColor').attr('stroke-opacity', 0.25);
-
-	// Zero baseline
-	if (maxValue > 0) {
-		const zero = horizontal ? valueScale(0) : valueScale(0);
-		if (horizontal) {
-			g.append('line').attr('x1', zero).attr('x2', zero).attr('y1', 0).attr('y2', innerHeight).attr('stroke', 'currentColor').attr('stroke-opacity', 0.4);
-		}
-	}
+		.call(valueAxis as never);
+	styleBareAxis(valueAxisG);
 
 	const tooltip = createTooltip(svg.parentElement!);
 
@@ -103,7 +95,7 @@ export function renderBarColumn(ctx: RenderContext) {
 		.data((row) => seriesCols.map((c) => ({ col: c, value: Number(row[c.id] ?? 0), row })))
 		.join('rect')
 		.attr('fill', (d) => color(d.col.id))
-		.attr('rx', 2)
+		.attr('rx', 1.5)
 		.attr('x', (d) => (horizontal ? 0 : (seriesScale(d.col.id) as number)))
 		.attr('y', (d) => (horizontal ? (seriesScale(d.col.id) as number) : valueScale(Math.max(0, d.value))))
 		.attr('width', (d) => (horizontal ? Math.abs(valueScale(d.value) - valueScale(0)) : seriesScale.bandwidth()))
@@ -114,12 +106,6 @@ export function renderBarColumn(ctx: RenderContext) {
 			tooltip.show(event, `${d.col.name}: ${formatValueForColumn(d.value, d.col)}`);
 		})
 		.on('mouseleave', () => tooltip.hide());
-
-	if (config.style.showLegend && seriesCols.length > 1) {
-		renderLegend(root, seriesCols, color, width);
-	}
-
-	renderTitleBlock(root, config, width);
 }
 
 export function createTooltip(container: HTMLElement) {
@@ -156,66 +142,4 @@ export function createTooltip(container: HTMLElement) {
 			el!.style.opacity = '0';
 		}
 	};
-}
-
-export function renderLegend(
-	root: d3.Selection<SVGSVGElement, unknown, null, undefined>,
-	seriesCols: { id: string; name: string }[],
-	color: d3.ScaleOrdinal<string, string>,
-	width: number
-) {
-	const legend = root.append('g').attr('class', 'legend').attr('font-size', 12);
-	let xOffset = 0;
-	seriesCols.forEach((col) => {
-		const item = legend.append('g').attr('transform', `translate(${xOffset},12)`);
-		item.append('rect').attr('width', 10).attr('height', 10).attr('rx', 2).attr('fill', color(col.id));
-		item
-			.append('text')
-			.attr('x', 16)
-			.attr('y', 9)
-			.attr('fill', 'currentColor')
-			.text(col.name);
-		xOffset += 16 + col.name.length * 7 + 16;
-	});
-	legend.attr('transform', `translate(${width - xOffset - 8}, 0)`);
-}
-
-export function renderTitleBlock(
-	root: d3.Selection<SVGSVGElement, unknown, null, undefined>,
-	config: ChartConfig,
-	width: number
-) {
-	const { title, subtitle, source, footerNote } = config.style;
-	if (title) {
-		root
-			.append('text')
-			.attr('x', 8)
-			.attr('y', 18)
-			.attr('font-size', 16)
-			.attr('font-weight', 600)
-			.attr('fill', 'currentColor')
-			.text(title);
-	}
-	if (subtitle) {
-		root
-			.append('text')
-			.attr('x', 8)
-			.attr('y', title ? 34 : 18)
-			.attr('font-size', 12)
-			.attr('fill', 'currentColor')
-			.attr('opacity', 0.7)
-			.text(subtitle);
-	}
-	const footerParts = [source, footerNote].filter(Boolean).join(' • ');
-	if (footerParts) {
-		root
-			.append('text')
-			.attr('x', 8)
-			.attr('y', '100%')
-			.attr('dy', -6)
-			.attr('font-size', 10)
-			.attr('fill', 'currentColor')
-			.attr('opacity', 0.6)
-			.text(footerParts);
-	}
 }

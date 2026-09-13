@@ -30,15 +30,17 @@ export interface ChartConfig {
 	};
 }
 
+// A muted, editorial palette (navy/brick/amber/teal/plum) rather than saturated
+// primary colors — closer to how Datawrapper's own default theme reads.
 export const defaultPalette = [
-	'#2563eb',
-	'#dc2626',
-	'#16a34a',
-	'#d97706',
-	'#7c3aed',
-	'#0891b2',
-	'#db2777',
-	'#65a30d'
+	'#1b5c85',
+	'#c0504d',
+	'#e8a33d',
+	'#3d8b82',
+	'#7b5aa6',
+	'#4c7a3d',
+	'#b0568c',
+	'#767676'
 ];
 
 export function defaultChartConfig(type: ChartTypeId = 'column'): ChartConfig {
