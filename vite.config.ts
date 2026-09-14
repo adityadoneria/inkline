@@ -18,7 +18,12 @@ export default defineConfig({
 				fallback: undefined,
 				precompress: false,
 				strict: true
-			})
+			}),
+			// GitHub Pages serves this as a project page at /inkline/, not the domain root —
+			// only set the base path in CI (see .github/workflows/deploy.yml); local dev/preview stay at '/'.
+			paths: {
+				base: process.env.BASE_PATH ?? ''
+			}
 		})
 	]
 });
